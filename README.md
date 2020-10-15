@@ -15,8 +15,7 @@ IV. Loops through the commits in the specified branch in `dirread`, starting fro
  - rsync
  
 ## Details
-
-<br> Merges are not preserved, only the main 1-d part of the branch is copied, navigating through the first parents starting from the latest commit in the branch.
+Merges are not preserved, only the main 1-d part of the branch is copied, navigating through the first parents starting from the latest commit in the branch.
 
 <br>`dirread` and `dircreate` names, `Exceptions`, repository url, and branch name are to be specified in `config.sh` file.
 
