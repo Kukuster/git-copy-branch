@@ -27,10 +27,10 @@ declare -r rsync="rsync"
 # ----- exit codes -----
 declare -A ExitCode=()
 ExitCode[noconfig]=1
-ExitCode[wrongconfig]=2
-ExitCode[dirIsNotEmpty]=3
-ExitCode[dirNoPermissions]=4
-ExitCode[nogit]=5
+ExitCode[nodependency]=2
+ExitCode[wrongconfig]=3
+ExitCode[dirIsNotEmpty]=4
+ExitCode[dirNoPermissions]=5
 ExitCode[cderror]=6
 ExitCode[wrongGitData]=7
 ExitCode[errorPulling]=8
@@ -43,19 +43,23 @@ declare -r remotename="origin"
 
 # ----- formatting -----
 #https://misc.flogisoft.com/bash/tip_colors_and_formatting
+#https://askubuntu.com/questions/528928/how-to-do-underline-bold-italic-strikethrough-color-background-and-size-i/985386#985386
 declare -r format_end='\e[0m'
 
 declare -r b='\e[1m'
-declare -r b_end='\e[21m'
 declare -r dim='\e[2m'
+declare -r b_dim_end='\e[22m'
+declare -r b_end='\e[22m'
 declare -r dim_end='\e[22m'
-declare -r u='\e[4m'
-declare -r u_end='\e[24m'
+declare -r u='\e[4:1m'
+declare -r uu='\e[4:2m'
+declare -r cu='\e[4:3m'
+declare -r u_end='\e[4:0m'
 declare -r blink='\e[5m'
 declare -r blink_end='\e[25m'
 
 declare -r color_end='\e[39m'
-declare -r black='\e[39m'
+declare -r black='\e[30m'
 declare -r red='\e[31m'
 declare -r green='\e[32m'
 declare -r yellow='\e[33m'
@@ -70,13 +74,13 @@ declare -r lightyellow='\e[93m'
 declare -r lightblue='\e[94m'
 declare -r lightmagenta='\e[95m'
 declare -r lightcyan='\e[96m'
-declare -r lightwhite='\e[97m'
+declare -r white='\e[97m'
 
-declare -r quote_str="${b}${dim}<<${dim_end}${format_end}"
-declare -r unquote_str="${b}${dim}>>${dim_end}${format_end}"
+declare -r quote_str="${b}${dim}<<${b_dim_end}"
+declare -r unquote_str="${b}${dim}>>${b_dim_end}"
 
-declare -r ERROR="${b}${red}ERROR${color_end}${format_end}"
-declare -r WARNING="${b}${yellow}WARNING${color_end}${format_end}"
+declare -r ERROR="${b}${red}ERROR${color_end}${b_end}"
+declare -r WARNING="${b}${yellow}WARNING${color_end}${b_end}"
 
 
 
@@ -95,7 +99,7 @@ destruct(){
 }
 # usage example: {
 #   mkdir "$tmpDir"
-#   rmTempDir=( rm "$tmpDir" )
+#   rmTempDir=( rm -rf "$tmpDir" )
 #   Destruct+=( rmTempDir )
 # }
 
@@ -123,7 +127,23 @@ unquote(){
 ellipsis(){
     echo -e "    ${b}${dim}."
     echo -e "    ."
-    echo -e "    .${dim_end}${format_end}"
+    echo -e "    .${b_dim_end}"
+}
+
+# trims the given output ($1) in terms of lines
+trim_output(){
+    #$1 - string
+    #$2 - max allowed number of lines
+    #$3 - number of lines to trim to, if max ($2) is exceeded
+    lines=`echo "$1" | wc -l`
+    if [ $lines -gt $2 ]; then
+        echo -e "$1" | head -n $3
+        echo -e "    ${b}${dim}."
+        echo -e "    ."
+        echo -e "    .${b_dim_end}"
+    else
+        echo -e "$1"
+    fi
 }
 
 
@@ -171,8 +191,7 @@ hasdelimiters(){
 #returns 1 if it doesn't
 }
 #example:
-#hasdelimiters "$0"
-#[[ $? -eq 0 ]] && p="\"$0\"" || p="$0"
+#hasdelimiters "$0" && p="\"$0\"" || p="$0"
 
 
 
@@ -203,34 +222,6 @@ ABSpath(){
     #if path is resolved successfully - echoes the resolved path and returns 0
     #otherwise echoes nothing and returns 1
 }
-
-
-#checks if a string variable contains any delimiters from defined in $IFS
-hasdelimiters(){
-    #$1 - string
-    #$2 - cutsom $IFS instead of global (optional)
-
-    local IFS="$IFS"
-    if [[ ! -z "$2" ]]; then
-        IFS="$2"
-    fi
-
-    local char=""
-    for (( i=0; i<${#IFS}; i++ )); do
-        char="${IFS:$i:1}"
-        if [[ "$1" == *"$char"* ]]; then
-            return 0
-        fi
-    done
-
-    return 1
-
-#returns 0 if a given string contains delimiters
-#returns 1 if it doesn't
-}
-#example:
-#hasdelimiters "$0"
-#[[ $? -eq 0 ]] && p="\"$0\"" || p="$0"
 
 
 
@@ -289,7 +280,7 @@ commitN(){
 rmAllExcept(){
     #$1 - a dir or file in the current directory that is not to delete
     for fd in {*,.[^.],.??*}; do
-        # if "exists" == if file OR if directory
+        # "if exists" == "if file OR if directory"
         if [[ -e "$fd" ]] && [[ "$fd" != "$1" ]]; then
             rm -rf "$fd"
         fi
@@ -313,18 +304,22 @@ rmAllExcept(){
 # ----- terminate if git doesn't exist ----- #
 if [ ! "`command -v "$git"`" ]; then
     echo -e "$ERROR: Boy, I couldn't find git! \ngit executable has to be available as \"${b}$git${format_end}\""
-    exit_ ${ExitCode[nogit]}
+    exit_ ${ExitCode[nodependency]}
 fi
 
+# ----- terminate if rsync doesn't exist ----- #
+if [ ! "`command -v "$rsync"`" ]; then
+    echo -e "$ERROR: rsync is not installed \"${b}$rsync${format_end}\""
+    exit_ ${ExitCode[nodependency]}
+fi
 
 # ----- terminate if no config file ----- #
 if [[ ! -f "$configfile" ]];then
     echo -e "$ERROR: no config file found at:"
-    
+
     quote
 
-    hasdelimiters "$configfile"
-    [[ $? -eq 0 ]] && o="\"$configfile\"" || o="$configfile"
+    hasdelimiters "$configfile" && o="\"$configfile\"" || o="$configfile"
     echo -e "$o"
 
     unquote
@@ -471,7 +466,7 @@ cd_ "$dircreate"
 "$git" checkout -b "$branch"
 ec=$?
 
-if [ $? -ne 0 ]; then
+if [ $ec -ne 0 ]; then
     rm -rf "$dircreate"
     echo -e "$ERROR: error creating a git branch '${b}${branch}${format_end}'"
     exit_ "${ExitCode[wrongGitData]}"
@@ -483,7 +478,7 @@ cd_ "$maindir"
 
 # ----- form copying command ----- #
 
-copyCMD=( rsync -avq --exclude='.git' )
+copyCMD=( "$rsync" -avq --exclude='.git' )
 for excl in "${Exclude[@]}"; do
     if [ -n "$excl" ]; then        
         excl="${excl//\"/\\\"}" # escapes double quotes
